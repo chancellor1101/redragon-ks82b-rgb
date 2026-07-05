@@ -170,8 +170,13 @@ class TrayApp:
         p.update(kw)
         self.send({"cmd": "set_mode", "name": "vu", "params": p})
 
-    def set_vu_device(self, device):
-        self.set_vu_option(device=device)
+    def set_audio_device(self, device):
+        # apply the chosen monitor to whichever audio mode is active (vu/aurora)
+        st = _daemon_status()
+        mode = st.get("mode") if st and st.get("mode") in ("vu", "aurora") else "vu"
+        p = dict(st.get("params", {})) if st and st.get("mode") == mode else {}
+        p["device"] = device
+        self.send({"cmd": "set_mode", "name": mode, "params": p})
 
     def set_brightness(self, value):
         self.send({"cmd": "brightness", "value": value})
@@ -205,11 +210,11 @@ class TrayApp:
         srcs = r["sources"] if r else []
         st = _daemon_status()
         cur = (st.get("params", {}).get("device")
-               if st and st.get("mode") == "vu" else None)
+               if st and st.get("mode") in ("vu", "aurora") else None)
         a = self.audio_menu.addAction("Default sink")
         a.setCheckable(True)
         a.setChecked(cur in (None, "default"))
-        a.triggered.connect(lambda _=False: self.set_vu_device("default"))
+        a.triggered.connect(lambda _=False: self.set_audio_device("default"))
         self.audio_menu.addSeparator()
         if not srcs:
             self.audio_menu.addAction("(no monitors found)").setEnabled(False)
@@ -218,7 +223,7 @@ class TrayApp:
             act = self.audio_menu.addAction(label)
             act.setCheckable(True)
             act.setChecked(s["name"] == cur)
-            act.triggered.connect(lambda _=False, n=s["name"]: self.set_vu_device(n))
+            act.triggered.connect(lambda _=False, n=s["name"]: self.set_audio_device(n))
 
     def _rebuild_vu_options(self):
         self.vu_menu.clear()

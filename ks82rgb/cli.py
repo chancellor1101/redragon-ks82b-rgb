@@ -253,14 +253,16 @@ def cmd_daemon(args):
 def cmd_mode(args):
     params = _effect_params(args.name, args.speed, args.color) \
         if args.name in _EFFECT_BASE_PERIOD else {}
-    if args.name == "vu":                       # preserve current vu params
+    if args.name in ("vu", "aurora"):           # audio modes: preserve + params
         st = ipc.request({"cmd": "status"})
-        if st and st.get("mode") == "vu":
+        if st and st.get("mode") == args.name:
             params = dict(st.get("params", {}))
-        for k in ("device", "style", "direction"):
-            v = getattr(args, k, None)
-            if v:
-                params[k] = v
+        if getattr(args, "device", None):
+            params["device"] = args.device
+        if args.name == "vu":                   # style/direction are vu-only
+            for k in ("style", "direction"):
+                if getattr(args, k, None):
+                    params[k] = getattr(args, k)
     r = ipc.request({"cmd": "set_mode", "name": args.name, "params": params})
     if r is None:
         raise SystemExit("daemon not running (start: `ks82rgb service install`).")

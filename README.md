@@ -106,11 +106,19 @@ The keyboard as a status display:
 
 ```bash
 ks82rgb mode cpu     # whole-board tint by CPU load: calm pale-green -> hot dark-red
-ks82rgb mode vu      # left-to-right audio VU bar (green->red)
+ks82rgb mode vu      # audio VU meter (bar or per-row spectrum)
+ks82rgb mode aurora  # flowing rainbow that reacts to the music
 ```
 
-`vu` needs PulseAudio/PipeWire's `parec` (usually preinstalled). CPU reads
-`/proc/stat`.
+- **`aurora`**: a flowing rainbow (like `wave`) driven by audio — louder music
+  makes it brighter and flow faster, and each key row blooms with its own
+  frequency band (bass at the bottom → treble at the top). Drifts gently when
+  it's quiet. `--device`/`--gain` like `vu`.
+
+`vu`/`aurora` need PulseAudio/PipeWire's `parec` (usually preinstalled) and, for
+frequency bands, `numpy`. CPU reads `/proc/stat`. Audio capture runs at low
+latency (`--latency-msec`) so meters stay smooth rather than lurching once a
+second.
 
 **VU styles, directions, and audio source.**
 

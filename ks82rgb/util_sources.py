@@ -90,49 +90,33 @@ class CpuMeterSource(Source):
         return {s: col for s in layout.lit_slots()}
 
 
-# ------------------------------------------------------------------ audio VU --
+# ---------------------------------------------------------------- audio ------
 _RATE = 44100
 _WINDOW = 2048                                       # FFT window (~46ms)
 _NBANDS = 6                                          # key rows (y = slot % 6)
 # log-spaced band edges (Hz), bass -> treble; _NBANDS+1 edges
 _BAND_EDGES = [40, 120, 300, 700, 1700, 4000, 16000]
+_LATENCY_MS = 25                                     # low parec latency = smooth
 _DIRECTIONS = ("right", "left", "up", "down")
 _STYLES = ("bar", "spectrum")
 
 
-@register
-class AudioVUSource(Source):
-    """Audio meter from a chosen monitor. Two styles, four directions.
+class AudioCapture:
+    """Shared audio analyzer: low-latency parec + rFFT, exposes `level` & `bands`.
 
-    style="bar":      one meter for overall loudness.
-    style="spectrum": one bar per key row, each row a frequency band
-                      (bass at the bottom -> treble at the top).
-    direction:        right/left/up/down (bar); right/left (spectrum fill).
-    device:           monitor name, or "default"/None to follow the default sink.
-
-    The reader self-heals -- if parec dies or the output switches, it
-    re-resolves the device and restarts.
+    Used by every audio-reactive source.  Self-heals: if parec dies or the
+    output device changes, it re-resolves and restarts.  The key detail for
+    smoothness is ``--latency-msec`` -- default parec buffers ~1s and makes the
+    meters lurch once a second.
     """
 
-    name = "vu"
-    kind = "utility"
-
-    def __init__(self, gain=4.0, device=None, style="spectrum", direction="right",
-                 **kw):
-        style = style if style in _STYLES else "spectrum"
-        direction = direction if direction in _DIRECTIONS else "right"
-        super().__init__(gain=gain, device=device, style=style, direction=direction)
-        self.gain = gain
+    def __init__(self, device=None, gain=4.0):
         self.device = device
-        self.style = style
-        self.direction = direction
-        self._level = 0.0
-        self._bands = [0.0] * _NBANDS
+        self.gain = gain
+        self.level = 0.0
+        self.bands = [0.0] * _NBANDS
         self._stop = threading.Event()
         self._proc = None
-        slots = layout.lit_slots()
-        self._xmax = max((layout.position(s)[0] for s in slots), default=1)
-        self._ymax = max((layout.position(s)[1] for s in slots), default=1)
         threading.Thread(target=self._reader, daemon=True).start()
 
     def _resolve_device(self):
@@ -140,17 +124,15 @@ class AudioVUSource(Source):
             return self.device
         return default_monitor() or "@DEFAULT_MONITOR@"
 
-    # -------------------------------------------------------------- capture --
     def _reader(self):
         if not shutil.which("parec"):
-            print("[ks82rgb] vu: `parec` not found; VU meter will stay flat.")
+            print("[ks82rgb] audio: `parec` not found; meters stay flat.")
             return
         try:
             import numpy as np
         except ImportError:
             np = None
-            print("[ks82rgb] vu: numpy not found; spectrum falls back to bar.")
-
+            print("[ks82rgb] audio: numpy missing; frequency bands disabled.")
         hann = band_bins = None
         if np is not None:
             hann = np.hanning(_WINDOW).astype(np.float32)
@@ -158,17 +140,16 @@ class AudioVUSource(Source):
             band_bins = [(int(np.searchsorted(freqs, _BAND_EDGES[i])),
                           int(np.searchsorted(freqs, _BAND_EDGES[i + 1])))
                          for i in range(_NBANDS)]
-
-        read_n = 1024                                # samples per read (~23ms)
+        read_n = 1024
         while not self._stop.is_set():
             dev = self._resolve_device()
             try:
                 self._proc = subprocess.Popen(
                     ["parec", "--format=s16le", "--rate=%d" % _RATE,
-                     "--channels=1", "-d", dev],
+                     "--channels=1", "--latency-msec=%d" % _LATENCY_MS, "-d", dev],
                     stdout=subprocess.PIPE, stderr=subprocess.DEVNULL)
             except Exception as e:
-                print(f"[ks82rgb] vu: could not start parec: {e}")
+                print(f"[ks82rgb] audio: parec failed: {e}")
                 time.sleep(2)
                 continue
             buf = np.zeros(_WINDOW, dtype=np.float32) if np is not None else None
@@ -184,13 +165,12 @@ class AudioVUSource(Source):
                     rms = float(np.sqrt(np.mean(s * s))) / 32768.0
                     buf = np.roll(buf, -n)
                     buf[-n:] = s
-                    if self.style == "spectrum":
-                        self._update_bands(np, buf, hann, band_bins)
+                    self._update_bands(np, buf, hann, band_bins)
                 else:
                     ss = struct.unpack(f"<{n}h", data[:n * 2])
                     rms = math.sqrt(sum(x * x for x in ss) / n) / 32768.0
                 lvl = min(1.0, rms * self.gain)
-                self._level = max(lvl, self._level * 0.85)  # fast attack, slow release
+                self.level = max(lvl, self.level * 0.85)  # fast attack, slow release
             if not self._stop.is_set():
                 time.sleep(1.0)                      # device gone; retry
 
@@ -199,7 +179,7 @@ class AudioVUSource(Source):
         for i, (lo, hi) in enumerate(band_bins):
             e = float(spec[lo:hi].sum()) if hi > lo else 0.0
             lvl = min(1.0, math.sqrt(e) * self.gain * 0.75)
-            self._bands[i] = max(lvl, self._bands[i] * 0.80)
+            self.bands[i] = max(lvl, self.bands[i] * 0.80)
 
     def close(self):
         self._stop.set()
@@ -208,6 +188,45 @@ class AudioVUSource(Source):
                 self._proc.terminate()
             except Exception:
                 pass
+
+
+@register
+class AudioVUSource(Source):
+    """Audio meter from a chosen monitor. Two styles, four directions.
+
+    style="bar":      one meter for overall loudness.
+    style="spectrum": one bar per key row, each row a frequency band
+                      (bass at the bottom -> treble at the top).
+    direction:        right/left/up/down (bar); right/left (spectrum fill).
+    device:           monitor name, or "default"/None to follow the default sink.
+    """
+
+    name = "vu"
+    kind = "utility"
+
+    def __init__(self, gain=4.0, device=None, style="spectrum", direction="right",
+                 **kw):
+        style = style if style in _STYLES else "spectrum"
+        direction = direction if direction in _DIRECTIONS else "right"
+        super().__init__(gain=gain, device=device, style=style, direction=direction)
+        self.style = style
+        self.direction = direction
+        self._cap = AudioCapture(device, gain)
+        slots = layout.lit_slots()
+        self._xmax = max((layout.position(s)[0] for s in slots), default=1)
+        self._ymax = max((layout.position(s)[1] for s in slots), default=1)
+
+    # exposed for `status` debugging and render
+    @property
+    def _level(self):
+        return self._cap.level
+
+    @property
+    def _bands(self):
+        return self._cap.bands
+
+    def close(self):
+        self._cap.close()
 
     # --------------------------------------------------------------- render --
     def _lit(self, frac, pos, axis_max):
@@ -249,4 +268,58 @@ class AudioVUSource(Source):
                 frame[s] = _hsv(hue, 1.0, 1.0)
             else:
                 frame[s] = (2, 2, 6)
+        return frame
+
+
+@register
+class AuroraSource(Source):
+    """Reactive rainbow: a flowing rainbow (like `wave`) driven by audio.
+
+    - louder music -> brighter and flows faster
+    - each key row glows with its own frequency band (bass at the bottom,
+      treble at the top), so the rainbow "blooms" to the beat.
+
+    Falls back to a gentle drifting rainbow when it's quiet, so it always looks
+    alive even between tracks -- and it's smooth even though the keyboard's
+    effective refresh is modest, because it never relies on sharp edges.
+    """
+
+    name = "aurora"
+    kind = "utility"
+
+    def __init__(self, gain=4.0, device=None, period=8.0, spread=1.3, **kw):
+        super().__init__(gain=gain, device=device, period=period, spread=spread)
+        self.period = period
+        self.spread = spread
+        self._cap = AudioCapture(device, gain)
+        self._phase = 0.0
+        self._last_t = None
+        slots = layout.lit_slots()
+        self._xmax = max((layout.position(s)[0] for s in slots), default=1)
+        self._ymax = max((layout.position(s)[1] for s in slots), default=1)
+
+    @property
+    def _level(self):
+        return self._cap.level
+
+    def close(self):
+        self._cap.close()
+
+    def render(self, t):
+        if self._last_t is None:
+            self._last_t = t
+        dt = max(0.0, t - self._last_t)
+        self._last_t = t
+        lvl = self._cap.level
+        bands = self._cap.bands
+        # flow speed: gentle base drift, sped up by loudness
+        self._phase += (1.0 / self.period) * (1.0 + 3.0 * lvl) * dt
+        frame = {}
+        for s in layout.lit_slots():
+            x, y = layout.position(s)
+            band = self._ymax - y                        # bass bottom -> treble top
+            b = bands[band] if 0 <= band < len(bands) else 0.0
+            hue = self._phase + (x / max(1, self._xmax)) * self.spread
+            val = min(1.0, 0.22 + 0.5 * lvl + 0.55 * b)  # glow + loudness + per-row band
+            frame[s] = _hsv(hue, 1.0, val)
         return frame
