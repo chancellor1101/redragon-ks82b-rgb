@@ -280,6 +280,11 @@ def cmd_stop(args):
     print("daemon stopping." if r else "daemon not running.")
 
 
+def cmd_gui(args):
+    from . import gui
+    return gui.run()
+
+
 def cmd_service(args):
     from . import service
     if args.action == "install":
@@ -287,6 +292,12 @@ def cmd_service(args):
             print("  " + line)
     elif args.action == "uninstall":
         for line in service.uninstall():
+            print("  " + line)
+    elif args.action == "install-gui":
+        for line in service.install_gui_autostart():
+            print("  " + line)
+    elif args.action == "uninstall-gui":
+        for line in service.uninstall_gui_autostart():
             print("  " + line)
     elif args.action == "status":
         os.execvp("systemctl", ["systemctl", "--user", "status", service.UNIT_NAME])
@@ -352,6 +363,8 @@ def build_parser():
 
     sub.add_parser("daemon", help="run the render daemon (foreground)").set_defaults(
         func=cmd_daemon)
+    sub.add_parser("gui", help="run the PyQt5 system-tray control panel").set_defaults(
+        func=cmd_gui)
     sub.add_parser("status", help="show daemon status").set_defaults(func=cmd_status)
     sub.add_parser("list-modes", help="list available modes").set_defaults(
         func=cmd_list_modes)
@@ -359,8 +372,9 @@ def build_parser():
     sub.add_parser("list-profiles").set_defaults(func=cmd_list_profiles)
     sub.add_parser("list-keys").set_defaults(func=cmd_list_keys)
 
-    s = sub.add_parser("service", help="install/manage the autostart service")
-    s.add_argument("action", choices=["install", "uninstall", "status"])
+    s = sub.add_parser("service", help="install/manage autostart (daemon + tray)")
+    s.add_argument("action", choices=["install", "uninstall", "status",
+                                      "install-gui", "uninstall-gui"])
     s.set_defaults(func=cmd_service)
     return p
 

@@ -96,8 +96,23 @@ ks82d daemon ──owns──▶ /dev/hidraw1        control socket (JSON over U
 
 **Modes are plugins.** Built-ins: `wave`, `breathing`, `rainbow`, `solid`,
 `static`. Drop a `.py` into `~/.config/ks82rgb/plugins/` exposing a `Source`
-subclass and it appears in `list-modes` — that's the whole extension model.
-State (current mode + brightness) persists to `~/.config/ks82rgb/state.json`.
+subclass and it appears in `list-modes` — that's the whole extension model (see
+`examples/plugins/police.py`). State (current mode + brightness) persists to
+`~/.config/ks82rgb/state.json`.
+
+## GUI (system tray)
+
+A PyQt5 tray app that steers the daemon over the same socket:
+
+```bash
+ks82rgb gui                  # launch the tray control panel
+ks82rgb service install-gui  # autostart the tray at login (XDG .desktop)
+```
+
+Left-click the tray icon for the control panel; right-click for the menu (mode
+picker, solid color dialog, brightness, off, daemon controls). It reflects
+live daemon state and any mode plugins you've added. Requires PyQt5
+(`python3-pyqt5` on Debian/Ubuntu; usually preinstalled on KDE).
 
 ## Profiles
 

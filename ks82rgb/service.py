@@ -68,3 +68,39 @@ def uninstall():
         steps.append("no unit file to remove")
     _systemctl("daemon-reload")
     return steps
+
+
+# ------------------------------------------------------------ tray autostart --
+AUTOSTART_DIR = os.path.join(
+    os.environ.get("XDG_CONFIG_HOME", os.path.expanduser("~/.config")),
+    "autostart")
+GUI_DESKTOP = "ks82rgb-tray.desktop"
+
+
+def _desktop_text():
+    return f"""[Desktop Entry]
+Type=Application
+Name=KS82-B RGB Tray
+Comment=System-tray control for the KS82-B RGB daemon
+Exec={_launcher_path()} gui
+Icon=input-keyboard
+Terminal=false
+X-GNOME-Autostart-enabled=true
+"""
+
+
+def install_gui_autostart():
+    os.makedirs(AUTOSTART_DIR, exist_ok=True)
+    path = os.path.join(AUTOSTART_DIR, GUI_DESKTOP)
+    with open(path, "w") as f:
+        f.write(_desktop_text())
+    return [f"wrote {path}", "tray will start at next login (run `ks82rgb gui` now)"]
+
+
+def uninstall_gui_autostart():
+    path = os.path.join(AUTOSTART_DIR, GUI_DESKTOP)
+    try:
+        os.unlink(path)
+        return [f"removed {path}"]
+    except FileNotFoundError:
+        return ["no tray autostart to remove"]
