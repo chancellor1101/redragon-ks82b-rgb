@@ -185,6 +185,23 @@ def cmd_list_keys(args):
     print(", ".join(layout.all_key_names()))
 
 
+def cmd_audio_sources(args):
+    r = ipc.request({"cmd": "audio_sources"})
+    srcs = r["sources"] if r else []
+    if not r:
+        from . import util_sources
+        srcs = util_sources.list_monitor_sources()
+    if not srcs:
+        print("(no audio monitor sources found)")
+        return
+    print("audio monitor sources (use with `mode vu --device NAME`):")
+    for s in srcs:
+        flags = " ".join(f for f, on in
+                         (("[running]", s["running"]), ("[default]", s.get("default")))
+                         if on)
+        print(f"  {s['name']}  {flags}")
+
+
 # ------------------------------------------------------- probe / calibrate ----
 def cmd_slot(args):
     with _direct_device() as kb:
@@ -236,6 +253,8 @@ def cmd_daemon(args):
 def cmd_mode(args):
     params = _effect_params(args.name, args.speed, args.color) \
         if args.name in _EFFECT_BASE_PERIOD else {}
+    if getattr(args, "device", None):
+        params["device"] = args.device
     r = ipc.request({"cmd": "set_mode", "name": args.name, "params": params})
     if r is None:
         raise SystemExit("daemon not running (start: `ks82rgb service install`).")
@@ -371,6 +390,7 @@ def build_parser():
     s.add_argument("name")
     s.add_argument("--color", default="cyan")
     s.add_argument("--speed", type=float, default=0)
+    s.add_argument("--device", help="audio monitor source for the vu mode")
     s.set_defaults(func=cmd_mode)
 
     s = sub.add_parser("brightness", help="set daemon brightness 0.0-1.0")
@@ -419,6 +439,8 @@ def build_parser():
     sub.add_parser("stop", help="stop the daemon").set_defaults(func=cmd_stop)
     sub.add_parser("list-profiles").set_defaults(func=cmd_list_profiles)
     sub.add_parser("list-keys").set_defaults(func=cmd_list_keys)
+    sub.add_parser("audio-sources", help="list audio monitors for vu").set_defaults(
+        func=cmd_audio_sources)
 
     s = sub.add_parser("service", help="install/manage autostart (daemon + tray)")
     s.add_argument("action", choices=["install", "uninstall", "status",

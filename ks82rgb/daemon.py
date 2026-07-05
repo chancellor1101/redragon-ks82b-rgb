@@ -211,6 +211,10 @@ class Daemon:
             self._save_service_config(name, req.get("enable", True))
             return {"ok": True, "services": sorted(self._services)}
 
+        if cmd == "audio_sources":
+            from .util_sources import list_monitor_sources
+            return {"ok": True, "sources": list_monitor_sources()}
+
         if cmd == "list_modes":
             return {"ok": True, "modes": sources.catalog()}
 

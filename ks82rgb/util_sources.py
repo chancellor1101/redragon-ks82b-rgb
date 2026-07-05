@@ -9,9 +9,44 @@ import shutil
 import struct
 import subprocess
 import threading
+import time
 
 from . import layout
 from .sources import Source, register
+
+
+def default_monitor():
+    """The default sink's monitor source name, or None."""
+    try:
+        sink = subprocess.check_output(
+            ["pactl", "get-default-sink"], text=True).strip()
+        return sink + ".monitor" if sink else None
+    except Exception:
+        return None
+
+
+def list_monitor_sources():
+    """Available monitor sources: [{name, label, running}] for the GUI chooser."""
+    out = []
+    default = default_monitor()
+    try:
+        lines = subprocess.check_output(
+            ["pactl", "list", "short", "sources"], text=True).splitlines()
+    except Exception:
+        return out
+    for line in lines:
+        parts = line.split("\t")
+        if len(parts) < 2 or not parts[1].endswith(".monitor"):
+            continue
+        name = parts[1]
+        state = parts[-1] if parts else ""
+        # friendlier label: drop the alsa_output prefix and .monitor suffix
+        label = name.replace("alsa_output.", "").replace(".monitor", "")
+        label = label.replace("usb-", "").replace("pci-", "")
+        out.append({"name": name, "label": label[:48],
+                    "running": state.upper() == "RUNNING",
+                    "default": name == default})
+    return out
 
 
 def _hsv(h, s, v):
@@ -58,14 +93,20 @@ class CpuMeterSource(Source):
 # ------------------------------------------------------------------ audio VU --
 @register
 class AudioVUSource(Source):
-    """Left-to-right VU bar from the default sink monitor (green->red)."""
+    """Left-to-right VU bar (green->red) from a chosen audio monitor.
+
+    `device` selects the capture source: a monitor name, or "default"/None to
+    follow the default sink.  The reader self-heals -- if parec dies or the
+    device disappears (output switched), it re-resolves and restarts.
+    """
 
     name = "vu"
     kind = "utility"
 
-    def __init__(self, gain=3.0, **kw):
-        super().__init__(gain=gain)
+    def __init__(self, gain=4.0, device=None, **kw):
+        super().__init__(gain=gain, device=device)
         self.gain = gain
+        self.device = device
         self._level = 0.0
         self._stop = threading.Event()
         self._proc = None
@@ -73,41 +114,40 @@ class AudioVUSource(Source):
                          default=1)
         threading.Thread(target=self._reader, daemon=True).start()
 
-    def _monitor_source(self):
-        try:
-            sink = subprocess.check_output(
-                ["pactl", "get-default-sink"], text=True).strip()
-            return sink + ".monitor"
-        except Exception:
-            return None
+    def _resolve_device(self):
+        if self.device and self.device != "default":
+            return self.device
+        return default_monitor() or "@DEFAULT_MONITOR@"
 
     def _reader(self):
         if not shutil.which("parec"):
             print("[ks82rgb] vu: `parec` not found; VU meter will stay flat.")
             return
-        cmd = ["parec", "--format=s16le", "--rate=44100", "--channels=1"]
-        mon = self._monitor_source()
-        if mon:
-            cmd += ["-d", mon]
-        try:
-            self._proc = subprocess.Popen(
-                cmd, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL)
-        except Exception as e:
-            print(f"[ks82rgb] vu: could not start parec: {e}")
-            return
         frame_bytes = 882 * 2                       # ~20ms @ 44.1kHz, mono s16
         while not self._stop.is_set():
-            data = self._proc.stdout.read(frame_bytes)
-            if not data:
-                break
-            n = len(data) // 2
-            if not n:
+            dev = self._resolve_device()
+            try:
+                self._proc = subprocess.Popen(
+                    ["parec", "--format=s16le", "--rate=44100",
+                     "--channels=1", "-d", dev],
+                    stdout=subprocess.PIPE, stderr=subprocess.DEVNULL)
+            except Exception as e:
+                print(f"[ks82rgb] vu: could not start parec: {e}")
+                time.sleep(2)
                 continue
-            samples = struct.unpack(f"<{n}h", data[:n * 2])
-            rms = math.sqrt(sum(s * s for s in samples) / n) / 32768.0
-            lvl = min(1.0, rms * self.gain)
-            # fast attack, slow release
-            self._level = max(lvl, self._level * 0.85)
+            while not self._stop.is_set():
+                data = self._proc.stdout.read(frame_bytes)
+                if not data:
+                    break                            # parec exited -> re-resolve
+                n = len(data) // 2
+                if not n:
+                    continue
+                samples = struct.unpack(f"<{n}h", data[:n * 2])
+                rms = math.sqrt(sum(s * s for s in samples) / n) / 32768.0
+                lvl = min(1.0, rms * self.gain)
+                self._level = max(lvl, self._level * 0.85)  # fast attack, slow release
+            if not self._stop.is_set():
+                time.sleep(1.0)                      # device gone; retry
 
     def close(self):
         self._stop.set()

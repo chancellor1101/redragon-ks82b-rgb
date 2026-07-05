@@ -106,11 +106,23 @@ The keyboard as a status display:
 
 ```bash
 ks82rgb mode cpu     # whole-board tint by CPU load: calm pale-green -> hot dark-red
-ks82rgb mode vu      # left-to-right audio VU bar (green->red) from the default sink
+ks82rgb mode vu      # left-to-right audio VU bar (green->red)
 ```
 
 `vu` needs PulseAudio/PipeWire's `parec` (usually preinstalled). CPU reads
 `/proc/stat`.
+
+**Picking the VU audio source.** By default `vu` follows the default sink. To
+capture a specific device (or if you have several outputs), choose one:
+
+```bash
+ks82rgb audio-sources                 # list monitor sources (marks running/default)
+ks82rgb mode vu --device <monitor>    # capture that specific monitor
+```
+
+Or use the tray: **Audio source (VU)** submenu (● marks a device that's currently
+playing). The capture self-heals — if `parec` dies or you switch outputs, it
+re-resolves and reconnects.
 
 ### Notification pulses + overlays
 

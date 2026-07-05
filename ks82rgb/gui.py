@@ -127,6 +127,8 @@ class TrayApp:
         self.menu.addAction("Off", lambda: self.send({"cmd": "off"}))
         self.bright_menu = self.menu.addMenu("Brightness")
         self._build_brightness_menu()
+        self.audio_menu = self.menu.addMenu("Audio source (VU)")
+        self.audio_menu.aboutToShow.connect(self._rebuild_audio)
         self.menu.addSeparator()
         self.win = ControlWindow(self)
         self.menu.addAction("Control panel...", self._show_window)
@@ -156,6 +158,10 @@ class TrayApp:
     def set_mode(self, name):
         self.send({"cmd": "set_mode", "name": name, "params": {}})
 
+    def set_vu_device(self, device):
+        # switches to vu mode capturing the chosen monitor
+        self.send({"cmd": "set_mode", "name": "vu", "params": {"device": device}})
+
     def set_brightness(self, value):
         self.send({"cmd": "brightness", "value": value})
 
@@ -181,6 +187,27 @@ class TrayApp:
             act.setCheckable(True)
             act.setChecked(name == current)
             act.triggered.connect(lambda _=False, n=name: self.set_mode(n))
+
+    def _rebuild_audio(self):
+        self.audio_menu.clear()
+        r = _req({"cmd": "audio_sources"})
+        srcs = r["sources"] if r else []
+        st = _daemon_status()
+        cur = (st.get("params", {}).get("device")
+               if st and st.get("mode") == "vu" else None)
+        a = self.audio_menu.addAction("Default sink")
+        a.setCheckable(True)
+        a.setChecked(cur in (None, "default"))
+        a.triggered.connect(lambda _=False: self.set_vu_device("default"))
+        self.audio_menu.addSeparator()
+        if not srcs:
+            self.audio_menu.addAction("(no monitors found)").setEnabled(False)
+        for s in srcs:
+            label = ("● " if s["running"] else "   ") + s["label"]
+            act = self.audio_menu.addAction(label)
+            act.setCheckable(True)
+            act.setChecked(s["name"] == cur)
+            act.triggered.connect(lambda _=False, n=s["name"]: self.set_vu_device(n))
 
     # -- window / tray events --
     def _show_window(self):
