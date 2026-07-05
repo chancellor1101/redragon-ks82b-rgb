@@ -64,6 +64,43 @@ ks82rgb list-profiles
 ks82rgb list-keys
 ```
 
+## Daemon & autostart
+
+For always-on lighting, ambient/utility modes, and (soon) notifications, meters,
+and Home Assistant control, run the daemon — a systemd `--user` service that owns
+the keyboard and renders at ~30 fps (skipping re-sends of unchanged frames, so
+static modes are nearly free).
+
+```bash
+ks82rgb service install     # install + enable + start the autostart daemon
+ks82rgb status              # what's running
+ks82rgb list-modes          # available modes (built-ins + plugins)
+ks82rgb mode wave           # switch base mode live
+ks82rgb brightness 0.6      # 0.0-1.0
+ks82rgb stop                # stop the daemon
+ks82rgb service uninstall   # remove autostart
+```
+
+When the daemon is running, `solid` / `key` / `off` / `effect` / `load`
+automatically route **through** it (no flicker, no fighting for the device).
+When it isn't, they fall back to a direct one-shot. `slot` / `calibrate` briefly
+pause the daemon so they can drive the device directly.
+
+### Architecture
+
+```
+ks82d daemon ──owns──▶ /dev/hidraw1        control socket (JSON over UNIX)
+  Compositor: base source + overlays          ▲            ▲
+  Sources (plugins): effects + utility    ks82rgb CLI   PyQt5 tray (planned)
+```
+
+**Modes are plugins.** Built-ins: `wave`, `breathing`, `rainbow`, `solid`,
+`static`. Drop a `.py` into `~/.config/ks82rgb/plugins/` exposing a `Source`
+subclass and it appears in `list-modes` — that's the whole extension model.
+State (current mode + brightness) persists to `~/.config/ks82rgb/state.json`.
+
+## Profiles
+
 Profiles are JSON in `profiles/`. Two shapes:
 
 ```json
