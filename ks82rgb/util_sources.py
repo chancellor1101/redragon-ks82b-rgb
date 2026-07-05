@@ -91,27 +91,48 @@ class CpuMeterSource(Source):
 
 
 # ------------------------------------------------------------------ audio VU --
+_RATE = 44100
+_WINDOW = 2048                                       # FFT window (~46ms)
+_NBANDS = 6                                          # key rows (y = slot % 6)
+# log-spaced band edges (Hz), bass -> treble; _NBANDS+1 edges
+_BAND_EDGES = [40, 120, 300, 700, 1700, 4000, 16000]
+_DIRECTIONS = ("right", "left", "up", "down")
+_STYLES = ("bar", "spectrum")
+
+
 @register
 class AudioVUSource(Source):
-    """Left-to-right VU bar (green->red) from a chosen audio monitor.
+    """Audio meter from a chosen monitor. Two styles, four directions.
 
-    `device` selects the capture source: a monitor name, or "default"/None to
-    follow the default sink.  The reader self-heals -- if parec dies or the
-    device disappears (output switched), it re-resolves and restarts.
+    style="bar":      one meter for overall loudness.
+    style="spectrum": one bar per key row, each row a frequency band
+                      (bass at the bottom -> treble at the top).
+    direction:        right/left/up/down (bar); right/left (spectrum fill).
+    device:           monitor name, or "default"/None to follow the default sink.
+
+    The reader self-heals -- if parec dies or the output switches, it
+    re-resolves the device and restarts.
     """
 
     name = "vu"
     kind = "utility"
 
-    def __init__(self, gain=4.0, device=None, **kw):
-        super().__init__(gain=gain, device=device)
+    def __init__(self, gain=4.0, device=None, style="spectrum", direction="right",
+                 **kw):
+        style = style if style in _STYLES else "spectrum"
+        direction = direction if direction in _DIRECTIONS else "right"
+        super().__init__(gain=gain, device=device, style=style, direction=direction)
         self.gain = gain
         self.device = device
+        self.style = style
+        self.direction = direction
         self._level = 0.0
+        self._bands = [0.0] * _NBANDS
         self._stop = threading.Event()
         self._proc = None
-        self._xmax = max((layout.position(s)[0] for s in layout.lit_slots()),
-                         default=1)
+        slots = layout.lit_slots()
+        self._xmax = max((layout.position(s)[0] for s in slots), default=1)
+        self._ymax = max((layout.position(s)[1] for s in slots), default=1)
         threading.Thread(target=self._reader, daemon=True).start()
 
     def _resolve_device(self):
@@ -119,35 +140,66 @@ class AudioVUSource(Source):
             return self.device
         return default_monitor() or "@DEFAULT_MONITOR@"
 
+    # -------------------------------------------------------------- capture --
     def _reader(self):
         if not shutil.which("parec"):
             print("[ks82rgb] vu: `parec` not found; VU meter will stay flat.")
             return
-        frame_bytes = 882 * 2                       # ~20ms @ 44.1kHz, mono s16
+        try:
+            import numpy as np
+        except ImportError:
+            np = None
+            print("[ks82rgb] vu: numpy not found; spectrum falls back to bar.")
+
+        hann = band_bins = None
+        if np is not None:
+            hann = np.hanning(_WINDOW).astype(np.float32)
+            freqs = np.fft.rfftfreq(_WINDOW, 1.0 / _RATE)
+            band_bins = [(int(np.searchsorted(freqs, _BAND_EDGES[i])),
+                          int(np.searchsorted(freqs, _BAND_EDGES[i + 1])))
+                         for i in range(_NBANDS)]
+
+        read_n = 1024                                # samples per read (~23ms)
         while not self._stop.is_set():
             dev = self._resolve_device()
             try:
                 self._proc = subprocess.Popen(
-                    ["parec", "--format=s16le", "--rate=44100",
+                    ["parec", "--format=s16le", "--rate=%d" % _RATE,
                      "--channels=1", "-d", dev],
                     stdout=subprocess.PIPE, stderr=subprocess.DEVNULL)
             except Exception as e:
                 print(f"[ks82rgb] vu: could not start parec: {e}")
                 time.sleep(2)
                 continue
+            buf = np.zeros(_WINDOW, dtype=np.float32) if np is not None else None
             while not self._stop.is_set():
-                data = self._proc.stdout.read(frame_bytes)
+                data = self._proc.stdout.read(read_n * 2)
                 if not data:
                     break                            # parec exited -> re-resolve
                 n = len(data) // 2
                 if not n:
                     continue
-                samples = struct.unpack(f"<{n}h", data[:n * 2])
-                rms = math.sqrt(sum(s * s for s in samples) / n) / 32768.0
+                if np is not None:
+                    s = np.frombuffer(data[:n * 2], dtype="<i2").astype(np.float32)
+                    rms = float(np.sqrt(np.mean(s * s))) / 32768.0
+                    buf = np.roll(buf, -n)
+                    buf[-n:] = s
+                    if self.style == "spectrum":
+                        self._update_bands(np, buf, hann, band_bins)
+                else:
+                    ss = struct.unpack(f"<{n}h", data[:n * 2])
+                    rms = math.sqrt(sum(x * x for x in ss) / n) / 32768.0
                 lvl = min(1.0, rms * self.gain)
                 self._level = max(lvl, self._level * 0.85)  # fast attack, slow release
             if not self._stop.is_set():
                 time.sleep(1.0)                      # device gone; retry
+
+    def _update_bands(self, np, buf, hann, band_bins):
+        spec = np.abs(np.fft.rfft(buf * hann)) / (_WINDOW * 32768.0)
+        for i, (lo, hi) in enumerate(band_bins):
+            e = float(spec[lo:hi].sum()) if hi > lo else 0.0
+            lvl = min(1.0, math.sqrt(e) * self.gain * 0.75)
+            self._bands[i] = max(lvl, self._bands[i] * 0.80)
 
     def close(self):
         self._stop.set()
@@ -156,6 +208,48 @@ class AudioVUSource(Source):
                 self._proc.terminate()
             except Exception:
                 pass
+
+    # --------------------------------------------------------------- render --
+    def _lit(self, frac, pos, axis_max):
+        """Whether a cell at `pos` (along the meter axis) is lit for `frac`."""
+        if self.direction in ("right", "down"):
+            return pos <= frac * axis_max
+        return pos >= axis_max - frac * axis_max     # left / up
+
+    def render(self, t):
+        if self.style == "spectrum":
+            return self._render_spectrum()
+        return self._render_bar()
+
+    def _render_bar(self):
+        vertical = self.direction in ("up", "down")
+        axis_max = self._ymax if vertical else self._xmax
+        frame = {}
+        for s in layout.lit_slots():
+            x, y = layout.position(s)
+            pos = y if vertical else x
+            if self._lit(self._level, pos, axis_max):
+                frac = pos / max(1, axis_max)
+                frame[s] = _hsv((1 - frac) * 0.33, 1.0, 1.0)  # green -> red
+            else:
+                frame[s] = (2, 2, 6)
+        return frame
+
+    def _render_spectrum(self):
+        frame = {}
+        for s in layout.lit_slots():
+            x, y = layout.position(s)
+            band = self._ymax - y                    # bass at the bottom row
+            band = max(0, min(_NBANDS - 1, band))
+            lvl = self._bands[band]
+            lit = (x <= lvl * self._xmax if self.direction != "left"
+                   else x >= self._xmax - lvl * self._xmax)
+            if lit:
+                hue = (band / max(1, _NBANDS - 1)) * 0.66   # bass red -> treble blue
+                frame[s] = _hsv(hue, 1.0, 1.0)
+            else:
+                frame[s] = (2, 2, 6)
+        return frame
 
     def render(self, t):
         fill = self._level * self._xmax

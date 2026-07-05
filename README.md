@@ -112,17 +112,25 @@ ks82rgb mode vu      # left-to-right audio VU bar (green->red)
 `vu` needs PulseAudio/PipeWire's `parec` (usually preinstalled). CPU reads
 `/proc/stat`.
 
-**Picking the VU audio source.** By default `vu` follows the default sink. To
-capture a specific device (or if you have several outputs), choose one:
+**VU styles, directions, and audio source.**
 
 ```bash
-ks82rgb audio-sources                 # list monitor sources (marks running/default)
-ks82rgb mode vu --device <monitor>    # capture that specific monitor
+ks82rgb mode vu --style spectrum --direction right   # per-row spectrum (default)
+ks82rgb mode vu --style bar --direction up            # single loudness bar
+ks82rgb audio-sources                                 # list monitor sources
+ks82rgb mode vu --device <monitor>                    # capture a specific device
 ```
 
-Or use the tray: **Audio source (VU)** submenu (● marks a device that's currently
-playing). The capture self-heals — if `parec` dies or you switch outputs, it
-re-resolves and reconnects.
+- **`spectrum`** (default, needs numpy): one bar per key row — the board becomes
+  a 6-band analyzer, **bass at the bottom (red) → treble at the top (blue)**.
+- **`bar`**: a single meter for overall loudness (green→red).
+- **`--direction`** `right`/`left`/`up`/`down` sets the fill direction (bar); for
+  spectrum, `left`/`right` flips which end the bars grow from.
+
+All of this is in the tray too: **VU options** (style + direction) and
+**Audio source (VU)** (● marks a device that's playing). By default `vu` follows
+the default sink, and the capture self-heals if `parec` dies or you switch
+outputs.
 
 ### Notification pulses + overlays
 

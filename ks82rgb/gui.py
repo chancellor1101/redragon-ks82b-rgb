@@ -129,6 +129,8 @@ class TrayApp:
         self._build_brightness_menu()
         self.audio_menu = self.menu.addMenu("Audio source (VU)")
         self.audio_menu.aboutToShow.connect(self._rebuild_audio)
+        self.vu_menu = self.menu.addMenu("VU options")
+        self.vu_menu.aboutToShow.connect(self._rebuild_vu_options)
         self.menu.addSeparator()
         self.win = ControlWindow(self)
         self.menu.addAction("Control panel...", self._show_window)
@@ -158,9 +160,18 @@ class TrayApp:
     def set_mode(self, name):
         self.send({"cmd": "set_mode", "name": name, "params": {}})
 
+    def _vu_params(self):
+        st = _daemon_status()
+        return dict(st.get("params", {})) if st and st.get("mode") == "vu" else {}
+
+    def set_vu_option(self, **kw):
+        # switch to vu, preserving other vu params
+        p = self._vu_params()
+        p.update(kw)
+        self.send({"cmd": "set_mode", "name": "vu", "params": p})
+
     def set_vu_device(self, device):
-        # switches to vu mode capturing the chosen monitor
-        self.send({"cmd": "set_mode", "name": "vu", "params": {"device": device}})
+        self.set_vu_option(device=device)
 
     def set_brightness(self, value):
         self.send({"cmd": "brightness", "value": value})
@@ -208,6 +219,25 @@ class TrayApp:
             act.setCheckable(True)
             act.setChecked(s["name"] == cur)
             act.triggered.connect(lambda _=False, n=s["name"]: self.set_vu_device(n))
+
+    def _rebuild_vu_options(self):
+        self.vu_menu.clear()
+        p = self._vu_params()
+        cur_style = p.get("style", "spectrum")
+        cur_dir = p.get("direction", "right")
+        self.vu_menu.addAction("Style").setEnabled(False)
+        for st in ("bar", "spectrum"):
+            a = self.vu_menu.addAction("  " + st)
+            a.setCheckable(True)
+            a.setChecked(st == cur_style)
+            a.triggered.connect(lambda _=False, v=st: self.set_vu_option(style=v))
+        self.vu_menu.addSeparator()
+        self.vu_menu.addAction("Direction").setEnabled(False)
+        for d in ("right", "left", "up", "down"):
+            a = self.vu_menu.addAction("  " + d)
+            a.setCheckable(True)
+            a.setChecked(d == cur_dir)
+            a.triggered.connect(lambda _=False, v=d: self.set_vu_option(direction=v))
 
     # -- window / tray events --
     def _show_window(self):

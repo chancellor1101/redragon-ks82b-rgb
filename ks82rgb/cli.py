@@ -253,8 +253,14 @@ def cmd_daemon(args):
 def cmd_mode(args):
     params = _effect_params(args.name, args.speed, args.color) \
         if args.name in _EFFECT_BASE_PERIOD else {}
-    if getattr(args, "device", None):
-        params["device"] = args.device
+    if args.name == "vu":                       # preserve current vu params
+        st = ipc.request({"cmd": "status"})
+        if st and st.get("mode") == "vu":
+            params = dict(st.get("params", {}))
+        for k in ("device", "style", "direction"):
+            v = getattr(args, k, None)
+            if v:
+                params[k] = v
     r = ipc.request({"cmd": "set_mode", "name": args.name, "params": params})
     if r is None:
         raise SystemExit("daemon not running (start: `ks82rgb service install`).")
@@ -391,6 +397,10 @@ def build_parser():
     s.add_argument("--color", default="cyan")
     s.add_argument("--speed", type=float, default=0)
     s.add_argument("--device", help="audio monitor source for the vu mode")
+    s.add_argument("--style", choices=["bar", "spectrum"],
+                   help="vu style: single bar or per-row spectrum")
+    s.add_argument("--direction", choices=["right", "left", "up", "down"],
+                   help="vu meter fill direction")
     s.set_defaults(func=cmd_mode)
 
     s = sub.add_parser("brightness", help="set daemon brightness 0.0-1.0")
