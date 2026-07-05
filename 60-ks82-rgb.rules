@@ -1,0 +1,14 @@
+# Redragon KS82-B (Sinowealth 258a:0049) -- allow non-root LED control.
+#
+# Install:
+#   sudo cp 60-ks82-rgb.rules /etc/udev/rules.d/
+#   sudo udevadm control --reload-rules
+#   # then unplug + replug the keyboard (fires the 'add' event that applies this)
+#
+# MODE 0666 makes the keyboard's hidraw nodes world-accessible.  On a personal
+# desktop this is fine (worst case: another local user changes your LED colors)
+# and avoids group-membership / login-seat timing issues.  If you prefer to
+# restrict it, use MODE="0660", GROUP="plugdev" instead (you must be in plugdev).
+
+# SUBSYSTEM form (matches the hidraw node directly via its USB grandparent)
+KERNEL=="hidraw*", SUBSYSTEMS=="usb", ATTRS{idVendor}=="258a", ATTRS{idProduct}=="0049", MODE="0666"

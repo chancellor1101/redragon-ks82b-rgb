@@ -1,0 +1,5 @@
+#!/usr/bin/env bash
+# Launcher: run the CLI from anywhere. Pure standard library -- no venv or pip
+# install needed. Override the interpreter with $KS82RGB_PYTHON if desired.
+here="$(cd "$(dirname "$(readlink -f "$0")")/.." && pwd)"
+exec env PYTHONPATH="$here${PYTHONPATH:+:$PYTHONPATH}" "${KS82RGB_PYTHON:-python3}" -m ks82rgb "$@"

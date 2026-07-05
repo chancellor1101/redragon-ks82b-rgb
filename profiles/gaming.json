@@ -1,0 +1,10 @@
+{
+  "type": "static",
+  "brightness": 1.0,
+  "base": "#111111",
+  "keys": {
+    "W": "red", "A": "red", "S": "red", "D": "red",
+    "Space": "cyan",
+    "Shift": "orange", "Ctrl": "orange"
+  }
+}

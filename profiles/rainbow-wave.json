@@ -1,0 +1,6 @@
+{
+  "type": "effect",
+  "name": "wave",
+  "brightness": 1.0,
+  "params": { "period": 6.0, "spread": 1.4 }
+}
