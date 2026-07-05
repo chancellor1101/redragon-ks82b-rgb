@@ -16,9 +16,12 @@ _SERVICES = {}
 
 
 class ServiceContext:
-    def __init__(self, compositor, now):
+    def __init__(self, compositor, now, command=None, subscribe=None, status=None):
         self.compositor = compositor
         self.now = now                      # callable -> current render time
+        self.command = command              # command(dict) -> resp; drive daemon
+        self.subscribe = subscribe          # subscribe(cb): cb() on state change
+        self.status = status                # status() -> current status dict
 
 
 class Service:
@@ -91,3 +94,7 @@ class NotificationService(Service):
                 self._proc.terminate()
             except Exception:
                 pass
+
+
+# Register the MQTT service (imports paho lazily, so this import is cheap/safe).
+from . import mqtt_service  # noqa: E402,F401

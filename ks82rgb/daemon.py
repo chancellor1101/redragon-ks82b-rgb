@@ -37,6 +37,7 @@ class Daemon:
         self._t0 = None
         self._base_spec = {"name": "solid", "params": {"color": [0, 0, 0]}}
         self._services = {}                # name -> running Service instance
+        self._state_listeners = []         # called on any mode/brightness change
 
     # ------------------------------------------------------------ lifecycle --
     def run(self):
@@ -125,6 +126,17 @@ class Daemon:
         self.comp.set_base(src)
         self._base_spec = src.describe()
         self._save_state()
+        self._notify_state()
+
+    def _notify_state(self):
+        for cb in list(self._state_listeners):
+            try:
+                cb()
+            except Exception as e:
+                print(f"[ks82rgb] state listener error: {e}")
+
+    def _subscribe_state(self, cb):
+        self._state_listeners.append(cb)
 
     # ------------------------------------------------------------- services --
     def _start_enabled_services(self):
@@ -140,7 +152,12 @@ class Daemon:
         if not svc.available():
             print(f"[ks82rgb] service {name} unavailable (missing dependency)")
             return
-        svc.start(services.ServiceContext(self.comp, self._now))
+        ctx = services.ServiceContext(
+            self.comp, self._now,
+            command=self._handle,
+            subscribe=self._subscribe_state,
+            status=lambda: self._handle({"cmd": "status"}))
+        svc.start(ctx)
         self._services[name] = svc
         print(f"[ks82rgb] service started: {name}")
 
@@ -173,6 +190,7 @@ class Daemon:
         if cmd == "brightness":
             self.comp.brightness = max(0.0, min(1.0, float(req["value"])))
             self._save_state()
+            self._notify_state()
             return {"ok": True, "brightness": self.comp.brightness}
 
         if cmd == "pulse":

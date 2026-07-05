@@ -126,6 +126,40 @@ Overlays and `pulse` are how other integrations (Home Assistant, CI status, …)
 signal you without taking over the base mode. Needs `dbus-monitor`
 (`dbus` / `dbus-bin` package).
 
+## Home Assistant / MQTT
+
+Control the keyboard from Home Assistant and pulse it from any automation. Uses
+MQTT discovery, so it auto-appears as one device with three entities:
+
+| Entity | What |
+|---|---|
+| **Keyboard** (light) | on/off, brightness, RGB color (color sets a solid mode) |
+| **Keyboard Mode** (select) | pick any mode — built-ins *and* plugins |
+| **Keyboard Pulse** (button) | fire a pulse overlay (doorbell, alarm, CI, …) |
+
+State is republished on every change (from HA, the CLI, or the tray) so entities
+stay in sync.
+
+```bash
+pip install --user --break-system-packages paho-mqtt   # if not already present
+ks82rgb mqtt setup            # writes ~/.config/ks82rgb/mqtt.json (chmod 600)
+# edit that file: host, port, username, password
+ks82rgb mqtt on               # connect + publish discovery (persists across restarts)
+ks82rgb mqtt off              # disable
+```
+
+Config (`~/.config/ks82rgb/mqtt.json`):
+
+```json
+{ "host": "homeassistant.local", "port": 1883,
+  "username": "mqtt_user", "password": "secret",
+  "discovery_prefix": "homeassistant", "base_topic": "ks82rgb" }
+```
+
+Raw topics (for non-HA use): `ks82rgb/mode/set` (mode name), `ks82rgb/light/set`
+(HA JSON light schema), `ks82rgb/pulse/set` (`PULSE` or a color), with state on
+`ks82rgb/*/state` and `ks82rgb/availability`.
+
 ## GUI (system tray)
 
 A PyQt5 tray app that steers the daemon over the same socket:

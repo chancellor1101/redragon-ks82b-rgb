@@ -304,6 +304,23 @@ def cmd_gui(args):
     return gui.run()
 
 
+def cmd_mqtt(args):
+    from . import mqtt_service
+    if args.action == "setup":
+        path = mqtt_service.write_template()
+        print(f"broker config: {path}")
+        print("edit host/port/username/password, then: ks82rgb mqtt on")
+        return
+    enable = args.action == "on"
+    r = ipc.request({"cmd": "service", "name": "mqtt", "enable": enable})
+    if r is None:
+        raise SystemExit("daemon not running.")
+    if not r.get("ok"):
+        raise SystemExit(f"daemon error: {r.get('error')}")
+    print(f"mqtt {'enabled' if enable else 'disabled'} "
+          f"(running: {', '.join(r.get('services', [])) or 'none'}).")
+
+
 def cmd_service(args):
     from . import service
     if args.action == "install":
@@ -394,6 +411,10 @@ def build_parser():
     s = sub.add_parser("notify", help="enable/disable notification pulses")
     s.add_argument("state", choices=["on", "off"])
     s.set_defaults(func=cmd_notify)
+
+    s = sub.add_parser("mqtt", help="Home Assistant / MQTT integration")
+    s.add_argument("action", choices=["setup", "on", "off"])
+    s.set_defaults(func=cmd_mqtt)
 
     sub.add_parser("stop", help="stop the daemon").set_defaults(func=cmd_stop)
     sub.add_parser("list-profiles").set_defaults(func=cmd_list_profiles)
