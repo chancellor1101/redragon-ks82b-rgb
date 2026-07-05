@@ -219,12 +219,15 @@ class Daemon:
             return {"ok": True, "modes": sources.catalog()}
 
         if cmd == "status":
+            base = self.comp.base
             return {"ok": True,
                     "mode": self._base_spec["name"],
                     "params": self._base_spec["params"],
                     "brightness": self.comp.brightness,
                     "connected": self._connected,
                     "services": sorted(self._services),
+                    "level": getattr(base, "_level", None),
+                    "bands": getattr(base, "_bands", None),
                     "fps": FPS,
                     "pid": os.getpid()}
 

@@ -250,15 +250,3 @@ class AudioVUSource(Source):
             else:
                 frame[s] = (2, 2, 6)
         return frame
-
-    def render(self, t):
-        fill = self._level * self._xmax
-        frame = {}
-        for s in layout.lit_slots():
-            x = layout.position(s)[0]
-            if x <= fill:
-                frac = x / max(1, self._xmax)         # green(0) -> red(1)
-                frame[s] = _hsv((1 - frac) * 0.33, 1.0, 1.0)
-            else:
-                frame[s] = (2, 2, 6)                  # dim unlit portion
-        return frame
