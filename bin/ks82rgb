@@ -1,5 +1,10 @@
 #!/usr/bin/env bash
-# Launcher: run the CLI from anywhere. Pure standard library -- no venv or pip
-# install needed. Override the interpreter with $KS82RGB_PYTHON if desired.
+# Launcher: run the CLI from anywhere. Pure standard library + system PyQt5 (for
+# the GUI) -- no venv or pip install needed. We pin to the system python3 and
+# clear any activated virtualenv so `ks82rgb gui` finds the system PyQt5 even
+# when a project .venv is active. Override with $KS82RGB_PYTHON.
 here="$(cd "$(dirname "$(readlink -f "$0")")/.." && pwd)"
-exec env PYTHONPATH="$here${PYTHONPATH:+:$PYTHONPATH}" "${KS82RGB_PYTHON:-python3}" -m ks82rgb "$@"
+PY="${KS82RGB_PYTHON:-/usr/bin/python3}"
+[ -x "$PY" ] || PY=python3
+exec env -u VIRTUAL_ENV -u PYTHONHOME PYTHONPATH="$here${PYTHONPATH:+:$PYTHONPATH}" \
+    "$PY" -m ks82rgb "$@"

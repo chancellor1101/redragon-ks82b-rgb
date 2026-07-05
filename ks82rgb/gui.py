@@ -212,7 +212,9 @@ class TrayApp:
 
 
 def run():
+    app = TrayApp()   # creates the QApplication first
+    # isSystemTrayAvailable() must be called *after* a QApplication exists,
+    # otherwise it dereferences a null qApp and segfaults.
     if not QtWidgets.QSystemTrayIcon.isSystemTrayAvailable():
         print("No system tray available on this session.", file=sys.stderr)
-    app = TrayApp()
     return app.exec()
