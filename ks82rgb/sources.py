@@ -154,3 +154,8 @@ class BreathingSource(_EffectSource):
         p = dict(params)
         color = tuple(p.pop("color"))
         return effects.breathing(color, **p)
+
+
+# Import utility sources last so their @register calls run (Source/register are
+# defined above, so this trailing import is not circular).
+from . import util_sources  # noqa: E402,F401

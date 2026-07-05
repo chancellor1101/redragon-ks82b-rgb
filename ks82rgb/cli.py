@@ -273,6 +273,25 @@ def cmd_status(args):
     print(f"mode:       {r['mode']}  params={params}")
     print(f"brightness: {int(r['brightness'] * 100)}%")
     print(f"keyboard:   {'connected' if r['connected'] else 'DISCONNECTED'}")
+    print(f"services:   {', '.join(r.get('services', [])) or '(none)'}")
+
+
+def cmd_pulse(args):
+    color = list(colors.parse_color(args.color))
+    r = ipc.request({"cmd": "pulse", "color": color})
+    if r is None:
+        raise SystemExit("daemon not running.")
+    print(f"pulsed {args.color}.")
+
+
+def cmd_notify(args):
+    enable = args.state == "on"
+    r = ipc.request({"cmd": "service", "name": "notifications", "enable": enable})
+    if r is None:
+        raise SystemExit("daemon not running.")
+    if not r.get("ok"):
+        raise SystemExit(f"daemon error: {r.get('error')}")
+    print(f"notifications {'enabled' if enable else 'disabled'}.")
 
 
 def cmd_stop(args):
@@ -368,6 +387,14 @@ def build_parser():
     sub.add_parser("status", help="show daemon status").set_defaults(func=cmd_status)
     sub.add_parser("list-modes", help="list available modes").set_defaults(
         func=cmd_list_modes)
+    s = sub.add_parser("pulse", help="flash an overlay color once (test/trigger)")
+    s.add_argument("color", nargs="?", default="white")
+    s.set_defaults(func=cmd_pulse)
+
+    s = sub.add_parser("notify", help="enable/disable notification pulses")
+    s.add_argument("state", choices=["on", "off"])
+    s.set_defaults(func=cmd_notify)
+
     sub.add_parser("stop", help="stop the daemon").set_defaults(func=cmd_stop)
     sub.add_parser("list-profiles").set_defaults(func=cmd_list_profiles)
     sub.add_parser("list-keys").set_defaults(func=cmd_list_keys)

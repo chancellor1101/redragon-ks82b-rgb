@@ -12,15 +12,19 @@ import signal
 import threading
 import time
 
-from . import ipc, sources
+from . import ipc, services, sources
 from .compositor import Compositor
 from .controller import DeviceError, Keyboard
+from .overlays import PulseOverlay
 
 FPS = 30
 CONFIG_DIR = os.path.join(
     os.environ.get("XDG_CONFIG_HOME", os.path.expanduser("~/.config")), "ks82rgb")
 STATE_PATH = os.path.join(CONFIG_DIR, "state.json")
+CONFIG_PATH = os.path.join(CONFIG_DIR, "config.json")
 PLUGIN_DIR = os.path.join(CONFIG_DIR, "plugins")
+
+DEFAULT_SERVICES = {"notifications": True}   # enabled unless config says otherwise
 
 
 class Daemon:
@@ -32,6 +36,7 @@ class Daemon:
         self._paused = threading.Event()   # set = don't drive LEDs (external tool)
         self._t0 = None
         self._base_spec = {"name": "solid", "params": {"color": [0, 0, 0]}}
+        self._services = {}                # name -> running Service instance
 
     # ------------------------------------------------------------ lifecycle --
     def run(self):
@@ -39,7 +44,9 @@ class Daemon:
         loaded = sources.load_plugins(PLUGIN_DIR)
         if loaded:
             print(f"[ks82rgb] loaded plugins: {', '.join(loaded)}")
+        self._t0 = time.monotonic()          # render/service timebase
         self._load_state()
+        self._start_enabled_services()
 
         srv, path = ipc.make_server()
         print(f"[ks82rgb] daemon up: {path}")
@@ -53,6 +60,8 @@ class Daemon:
 
         self._render_loop()
 
+        for svc in list(self._services.values()):
+            svc.stop()
         try:
             srv.close()
             os.unlink(path)
@@ -61,6 +70,9 @@ class Daemon:
         if self.kb:
             self.kb.close()
         print("[ks82rgb] daemon stopped")
+
+    def _now(self):
+        return (time.monotonic() - self._t0) if self._t0 else 0.0
 
     def _ensure_device(self):
         if self._connected:
@@ -75,7 +87,6 @@ class Daemon:
         return self._connected
 
     def _render_loop(self):
-        self._t0 = time.monotonic()
         interval = 1.0 / FPS
         last_frame = None
         next_tick = time.monotonic()
@@ -115,6 +126,29 @@ class Daemon:
         self._base_spec = src.describe()
         self._save_state()
 
+    # ------------------------------------------------------------- services --
+    def _start_enabled_services(self):
+        enabled = {**DEFAULT_SERVICES, **self._load_config().get("services", {})}
+        for name, on in enabled.items():
+            if on and name in services.names():
+                self._start_service(name)
+
+    def _start_service(self, name):
+        if name in self._services:
+            return
+        svc = services.create(name)
+        if not svc.available():
+            print(f"[ks82rgb] service {name} unavailable (missing dependency)")
+            return
+        svc.start(services.ServiceContext(self.comp, self._now))
+        self._services[name] = svc
+        print(f"[ks82rgb] service started: {name}")
+
+    def _stop_service(self, name):
+        svc = self._services.pop(name, None)
+        if svc:
+            svc.stop()
+
     def _handle(self, req):
         cmd = req.get("cmd")
         if cmd == "ping":
@@ -141,6 +175,24 @@ class Daemon:
             self._save_state()
             return {"ok": True, "brightness": self.comp.brightness}
 
+        if cmd == "pulse":
+            self.comp.add_overlay(PulseOverlay(
+                self._now(),
+                color=req.get("color", [255, 255, 255]),
+                duration=req.get("duration", 0.9)))
+            return {"ok": True}
+
+        if cmd == "service":
+            name = req["name"]
+            if name not in services.names():
+                return {"ok": False, "error": f"unknown service: {name}"}
+            if req.get("enable", True):
+                self._start_service(name)
+            else:
+                self._stop_service(name)
+            self._save_service_config(name, req.get("enable", True))
+            return {"ok": True, "services": sorted(self._services)}
+
         if cmd == "list_modes":
             return {"ok": True, "modes": sources.catalog()}
 
@@ -150,6 +202,7 @@ class Daemon:
                     "params": self._base_spec["params"],
                     "brightness": self.comp.brightness,
                     "connected": self._connected,
+                    "services": sorted(self._services),
                     "fps": FPS,
                     "pid": os.getpid()}
 
@@ -189,3 +242,19 @@ class Daemon:
             self._set_base(base.get("name", "wave"), base.get("params", {}))
         except KeyError:
             self._set_base("wave", {})
+
+    def _load_config(self):
+        try:
+            with open(CONFIG_PATH) as f:
+                return json.load(f)
+        except (OSError, ValueError):
+            return {}
+
+    def _save_service_config(self, name, enabled):
+        cfg = self._load_config()
+        cfg.setdefault("services", {})[name] = enabled
+        os.makedirs(CONFIG_DIR, exist_ok=True)
+        tmp = CONFIG_PATH + ".tmp"
+        with open(tmp, "w") as f:
+            json.dump(cfg, f, indent=2)
+        os.replace(tmp, CONFIG_PATH)

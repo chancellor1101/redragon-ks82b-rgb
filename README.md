@@ -100,6 +100,32 @@ subclass and it appears in `list-modes` — that's the whole extension model (se
 `examples/plugins/police.py`). State (current mode + brightness) persists to
 `~/.config/ks82rgb/state.json`.
 
+### Ambient / utility modes
+
+The keyboard as a status display:
+
+```bash
+ks82rgb mode cpu     # whole-board tint by CPU load: calm pale-green -> hot dark-red
+ks82rgb mode vu      # left-to-right audio VU bar (green->red) from the default sink
+```
+
+`vu` needs PulseAudio/PipeWire's `parec` (usually preinstalled). CPU reads
+`/proc/stat`.
+
+### Notification pulses + overlays
+
+A D-Bus listener flashes the board on every desktop notification, painted *over*
+whatever mode is running (uses the compositor's overlay layer):
+
+```bash
+ks82rgb notify off / on   # toggle notification pulses (default on)
+ks82rgb pulse "#00ff88"   # fire a one-off pulse (test, or trigger from scripts)
+```
+
+Overlays and `pulse` are how other integrations (Home Assistant, CI status, …)
+signal you without taking over the base mode. Needs `dbus-monitor`
+(`dbus` / `dbus-bin` package).
+
 ## GUI (system tray)
 
 A PyQt5 tray app that steers the daemon over the same socket:
